@@ -9,12 +9,14 @@ import android.graphics.Paint;
 import android.graphics.Path;
 import android.graphics.Rect;
 import android.support.annotation.Nullable;
+import android.text.TextUtils;
 import android.util.AttributeSet;
 import android.util.SparseArray;
 import android.util.SparseIntArray;
 import android.view.MotionEvent;
 import android.view.View;
 
+import java.util.ArrayList;
 import java.util.List;
 
 import static android.graphics.Paint.ANTI_ALIAS_FLAG;
@@ -23,14 +25,14 @@ import static android.graphics.Paint.Style.FILL_AND_STROKE;
 import static android.graphics.Paint.Style.STROKE;
 import static java.lang.StrictMath.PI;
 import static java.lang.StrictMath.cos;
-import static java.lang.StrictMath.max;
 import static java.lang.StrictMath.min;
 import static java.lang.StrictMath.sin;
 
 public class RadarChartView extends View {
-    
-    // TODO 2. 드로우 애니메이션
 
+    // TODO 필수 - 텍스트 OnClickListener
+    // TODO 선택사항 드로우 애니메이션
+    private Context context;
     private double angle;           // 한 칸 각도
 
     // center ( x, y )
@@ -55,12 +57,11 @@ public class RadarChartView extends View {
 
     // data value polygon
     private int maxValue;
-    private SparseIntArray pointValue;
+    private List<Integer> pointValue;
 
     // Draw Object
     private float[] vertices;       // 선의 좌표
     private float[] textVertices;   // 텍스트 좌표
-
 
     private Path path;
     private Paint linePaint;            // 선의 색상
@@ -68,10 +69,10 @@ public class RadarChartView extends View {
     private Paint polygonPaint;     // 5개의 단계 구분선
     private Paint pointPaint;       // 각 영역 별 값의 선
 
+    private RadarTextItemClickListener listener;
+
     // public method 사용
     // protected method 상속. 변경에 열림
-
-
     public RadarChartView(Context context) {
         this(context, null);
     }
@@ -83,6 +84,7 @@ public class RadarChartView extends View {
 
     public RadarChartView(Context context, @Nullable AttributeSet attrs, int defStyleAttr) {
         super(context, attrs, defStyleAttr);
+        this.context = context;
         init(context, attrs);
     }
 
@@ -92,7 +94,7 @@ public class RadarChartView extends View {
         // 1. 초기 이미지 설정 또는 값 설정 ( Attribute 의 영향이 없는 고정 변수 )
         textRect = new Rect();
         path = new Path();
-        pointValue = new SparseIntArray();     // 항목별 통계값 리스트, 수치 퍼센트의 분자
+        pointValue = new ArrayList<>();     // 항목별 통계값 리스트, 수치 퍼센트의 분자
 
         // 2. Attribute 입력된 값에 해당하는 정보
         // default init value
@@ -138,9 +140,9 @@ public class RadarChartView extends View {
         if(attr == null) return;
 
         lineCount = attr.getInteger(R.styleable.radarChart_chartCount, 8);
-        textSize = attr.getDimensionPixelSize(R.styleable.radarChart_textSize, 24); // pixel size
+        textSize = attr.getDimensionPixelSize(R.styleable.radarChart_textSize, 36); // pixel size
         textSpace = attr.getInteger(R.styleable.radarChart_textSpace, 100);         // parent - text 공백
-        lineSpace = attr.getInteger(R.styleable.radarChart_lineSpace, 50);          // text - line 공백
+        lineSpace = attr.getInteger(R.styleable.radarChart_lineSpace, 100);          // text - line 공백
         maxValue = attr.getInteger(R.styleable.radarChart_maxValue, 100);           // 수치 퍼센트의 분모
     }
 
@@ -186,19 +188,24 @@ public class RadarChartView extends View {
     public void setPointValueList(int[] list){
         pointValue.clear();
         for(int i=0; i<list.length; i++){
-            pointValue.put(i, list[i]);
+            pointValue.add(i, list[i]);
         }
     }
 
     public void setPointValueList(List<Integer> list){
         pointValue.clear();
         for(int i=0; i<list.size(); i++){
-            pointValue.put(i, list.get(i));
+            pointValue.add(i, list.get(i));
         }
     }
 
-    public void setPointValuePosition(int point, int pos){
-        pointValue.put(pos, point);
+    public void setPointValuePosition(int pos, int point){
+        pointValue.add(pos, point);
+        requestLayout();
+    }
+
+    public void setMaxValue(int maxValue) {
+        this.maxValue = maxValue;
     }
 
     public void setTextSize(float textSize) {
@@ -211,6 +218,14 @@ public class RadarChartView extends View {
 
     public void setLineSpace(int lineSpace) {
         this.lineSpace = lineSpace;
+    }
+
+    public void setListener(RadarTextItemClickListener listener) {
+        this.listener = listener;
+    }
+
+    public RadarTextItemClickListener getListener() {
+        return listener;
     }
 
     // onSizeChanged() - handle the padding values
@@ -337,9 +352,11 @@ public class RadarChartView extends View {
     private void drawRadarText(Canvas canvas) {
         if(textValue.size() != 0) {
             for (int i = 0; i < lineCount * 2; i += 2) {
-                float width = getTextWidth(i / 2);
-                float height = getTextHeight(i / 2);
-                canvas.drawText(textValue.get(i/2), textVertices[i] - width / 2, textVertices[i + 1] + height / 2, textPaint);
+                if(!TextUtils.isEmpty(textValue.get(i/2))) {
+                    float width = getTextWidth(i / 2);
+                    float height = getTextHeight(i / 2);
+                    canvas.drawText(textValue.get(i/2), textVertices[i] - width / 2, textVertices[i + 1] + height / 2, textPaint);
+                }
             }
         }
     }
@@ -373,14 +390,26 @@ public class RadarChartView extends View {
 
     @Override
     public boolean onTouchEvent(MotionEvent event) {
+        if(event.getAction() == MotionEvent.ACTION_DOWN && listener != null){
+            float x = event.getX();
+            float y = event.getY();
+
+            for(int i=0; i<lineCount*2; i+=2){
+                float width = getTextWidth(i/2);
+                float height = getTextHeight(i/2);
+
+                float x1 = textVertices[i]- width;
+                float x2 = textVertices[i] + width;
+                float y1 = textVertices[i+1] - height;
+                float y2 = textVertices[i+1] + height;
+
+                if( x1 <= x && x2 >= x && y1 <= y && y2 >= y){
+                    listener.onItemClick(i/2);
+                    return true;
+                }
+            }
+        }
         return super.onTouchEvent(event);
-        // GestureDetector
-        // onFling - Scroller class
-        // ValueAnimator
-        // ViewPropertyAnimator
-
-        // Text Click Event
     }
-
 
 }
